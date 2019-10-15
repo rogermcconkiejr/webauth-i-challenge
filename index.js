@@ -1,12 +1,36 @@
 const express = require('express');
 const bcrypt = require('bcryptjs'); 
+const sessions = require('express-session');
+const KnexSessionStore = require('connect-session-knex')(sessions);
 
 const db = require('./data/dbConfig');
 const Users = require('./users/users-model');
+const knexConfig = require('./data/dbConfig');
+
 
 const server = express();
 
+const sessionConfig = {
+  name: 'ohfosho',
+  secret: 'keep it secret, keep it safe!', //better to be in environment and dynamic.
+  cookie:{
+    httpOnly: true, // JS cannot access the cookie (which is what we want.)
+    maxAge: 1000 * 60 * 60,  // This is in milliseconds, so this will last for an hour.
+    secure: false, //should be true in prod, false in dev. Change based on env.
+  },
+  resave: false,
+  saveUninitialized: true, // keep this false until users accept cookies.
+  //change to use our database instead of memory.
+  store: new KnexSessionStore({
+    knex: knexConfig,
+    createtable: true, //automatically create sessions table in db.
+    clearInterval: 1000 * 60 * 30, //delete expired sessions every thirty mins.
+  })
+}
+
+server.use(sessions(sessionConfig))
 server.use(express.json());
+
 
 server.get('/', (req, res) => {
   res.send("It's alive!");
@@ -35,6 +59,7 @@ server.post('/api/login', (req, res) => {
       .first()
       .then(user => {
         if (user && bcrypt.compareSync(password, user.password)) {
+          req.session.username = user.username;
           res.status(200).json({ message: `Logged in` });
         } else {
           res.status(401).json({ message: 'You shall not pass!!' });
@@ -56,6 +81,16 @@ server.get('/api/users', protected, (req, res) => {
     .catch(err => res.send(err));
 });
 
+server.get('/api/logout', (req, res)=>{
+  if(req.session){
+  req.session.destroy(err=>{
+    res.status(200).json({ message: 'logged out.'})
+  });
+  } else {
+    res.status(200).json({ message: 'Already logged out.'})
+  }
+})
+
 // server.get('/hash', (req, res)=>{
 // const password = req.headers.authorization;
 // if(password){
@@ -71,24 +106,30 @@ server.get('/api/users', protected, (req, res) => {
 
 
 function protected(req, res, next) {
-    let { username, password } = req.headers;
+  if (req.session && req.session.username) {
+    next()
+  } else {
+    res.status(401).json({ message: 'you shall not pass!'})
+  }
 
-    if (username && password) {
-      Users.findBy({ username })
-        .first()
-        .then(user => {
-          if (user && bcrypt.compareSync(password, user.password)) {
-            next()
-          } else {
-            res.status(401).json({ message: 'You shall not pass!!' });
-          }
-        })
-        .catch(error => {
-          res.status(500).json(error);
-        });
-    } else {
-      res.status(400).json({ message: 'please provide valid credentials' });
-    }
+    // let { username, password } = req.headers;
+
+    // if (username && password) {
+    //   Users.findBy({ username })
+    //     .first()
+    //     .then(user => {
+    //       if (user && bcrypt.compareSync(password, user.password)) {
+    //         next()
+    //       } else {
+    //         res.status(401).json({ message: 'You shall not pass!!' });
+    //       }
+    //     })
+    //     .catch(error => {
+    //       res.status(500).json(error);
+    //     });
+    // } else {
+    //   res.status(400).json({ message: 'please provide valid credentials' });
+    // }
 
 }
 const port = process.env.PORT || 5555;
